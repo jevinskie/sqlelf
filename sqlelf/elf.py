@@ -11,13 +11,12 @@ import apsw.ext
 import capstone  # type: ignore
 import lief
 
-import lief.ELF
+from elftools.common.utils import bytes2str
+from elftools.dwarf.descriptions import describe_form_class
+from elftools.dwarf.die import DIE as DIE_t
+from elftools.elf.elffile import ELFFile
 
 from sqlelf import lief_ext
-from sqlelf._vendor.elftools.common.utils import bytes2str
-from sqlelf._vendor.elftools.dwarf.descriptions import describe_form_class
-from sqlelf._vendor.elftools.dwarf.die import DIE as DIE_t
-from sqlelf._vendor.elftools.elf.elffile import ELFFile
 
 LOG = logging.getLogger(__name__)
 
@@ -198,7 +197,7 @@ def register_instructions_generator(
                     section_name = section.name
                     for address, size, mnemonic, op_str in md.disasm_lite(
                         data, section.virtual_address
-                    ):
+                    ): 
                         yield {
                             "path": binary_name,
                             "section": section_name,

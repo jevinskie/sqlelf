@@ -23,6 +23,7 @@ classifiers = [
 ]
 dependencies = [
     "capstone >= 5.0.1",
+    "pyelftools >= 0.32",
     # lief has proven to change API a lot
     # pin it to a specific version
     "lief >= 0.17, < 0.18",
