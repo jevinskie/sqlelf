@@ -366,6 +366,11 @@ def register_symbols_generator(
             # as they can be costly
             binary_name = binary.path
             for symbol in symbols(binary):
+                # skip the undefined symbol
+                if (symbol.shndx == 0 and symbol.value == 0 and symbol.size == 0
+                    and symbol.type == lief.ELF.Symbol.TYPE.NOTYPE and symbol.binding == lief.ELF.Symbol.BINDING.LOCAL
+                    and symbol.visibility == lief.ELF.Symbol.VISIBILITY.DEFAULT and symbol.name == ""):
+                    continue
                 yield {
                     "path": binary_name,
                     "name": symbol.name,
