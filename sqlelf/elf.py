@@ -11,9 +11,6 @@ import apsw.ext
 import capstone  # type: ignore
 import lief
 
-# ELF.pyi has no matching py file since it's a c extension
-# pyright: reportMissingModuleSource=false
-# https://github.com/microsoft/pyright/issues/5950
 import lief.ELF
 
 from sqlelf import lief_ext
@@ -32,9 +29,10 @@ class Generator:
     This class is needed because apsw wants to assign columns and
     column_access to the generator function itself."""
 
-    columns: Sequence[str]
+    columns: tuple[str, ...]
     column_access: apsw.ext.VTColumnAccess
     callable: Callable[[], Iterator[dict[str, Any]]]
+    primary_key: int | None = None
 
     def __call__(self) -> Iterator[dict[str, Any]]:
         """Call the generator should return an iterator of dictionaries.
@@ -44,7 +42,7 @@ class Generator:
 
     @staticmethod
     def make_generator(
-        columns: list[str], generator: Callable[[], Iterator[dict[str, Any]]]
+        columns: tuple[str, ...], generator: Callable[[], Iterator[dict[str, Any]]]
     ) -> Generator:
         """Create a generator from a callable that returns
         an iterator of dictionaries."""
@@ -125,12 +123,12 @@ def register_dynamic_entries_generator(
             for entry in binary.dynamic_entries:
                 yield {
                     "path": binary_name,
-                    "tag": entry.tag.__name__,
+                    "tag": entry.tag.name,
                     "value": entry.value,
                 }
 
     generator = Generator.make_generator(
-        ["path", "tag", "value"],
+        ("path", "tag", "value"),
         dynamic_entries_generator,
     )
 
@@ -152,15 +150,15 @@ def register_headers_generator(
         for binary in binaries:
             yield {
                 "path": binary.path,
-                "type": binary.header.file_type.__name__,
-                "machine": binary.header.machine_type.__name__,
-                "version": binary.header.identity_version.__name__,
+                "type": binary.header.file_type.name,
+                "machine": binary.header.machine_type.name,
+                "version": binary.header.identity_version.name,
                 "entry": binary.header.entrypoint,
                 "is_pie": binary.is_pie,
             }
 
     generator = Generator.make_generator(
-        ["path", "type", "machine", "version", "entry", "is_pie"],
+        ("path", "type", "machine", "version", "entry", "is_pie"),
         headers_generator,
     )
 
@@ -187,7 +185,7 @@ def register_instructions_generator(
             binary_name = binary.path
 
             for section in binary.sections:
-                if section.has(lief.ELF.SECTION_FLAGS.EXECINSTR):
+                if section.has(lief.ELF.Section.FLAGS.EXECINSTR):
                     data = bytes(section.content)
                     md = capstone.Cs(arch(binary), mode(binary))
                     # keep in mind that producing details costs more memory,
@@ -211,7 +209,7 @@ def register_instructions_generator(
                         }
 
     generator = Generator.make_generator(
-        ["path", "section", "mnemonic", "address", "operands", "size"],
+        ("path", "section", "mnemonic", "address", "operands", "size"),
         instructions_generator,
     )
 
@@ -228,19 +226,19 @@ def mode(binary: lief_ext.Binary) -> int:
     machine_type = binary.header.machine_type
     identity_class = binary.header.identity_class
     if machine_type == lief.ELF.ARCH.RISCV:
-        if identity_class == lief.ELF.ELF_CLASS.CLASS32:
+        if identity_class == lief.ELF.Header.CLASS.ELF32:
             return cast(int, capstone.CS_MODE_RISCV32)
     if machine_type == lief.ELF.ARCH.RISCV:
-        if identity_class == lief.ELF.ELF_CLASS.CLASS64:
+        if identity_class == lief.ELF.Header.CLASS.ELF64:
             return cast(int, capstone.CS_MODE_RISCV64)
-    if machine_type == lief.ELF.ARCH.x86_64:
-        if identity_class == lief.ELF.ELF_CLASS.CLASS64:
+    if machine_type == lief.ELF.ARCH.X86_64:
+        if identity_class == lief.ELF.Header.CLASS.ELF64:
             return cast(int, capstone.CS_MODE_64)
     raise RuntimeError(f"Unknown mode for {binary.path}")
 
 
 def arch(binary: lief_ext.Binary) -> int:
-    if binary.header.machine_type == lief.ELF.ARCH.x86_64:
+    if binary.header.machine_type == lief.ELF.ARCH.X86_64:
         return cast(int, capstone.CS_ARCH_X86)
     elif binary.header.machine_type == lief.ELF.ARCH.RISCV:
         return cast(int, capstone.CS_ARCH_RISCV)
@@ -264,7 +262,7 @@ def register_sections_generator(
                         "name": section.name,
                         "offset": section.offset,
                         "size": section.size,
-                        "type": section.type.__name__,
+                        "type": section.type.name,
                         "content": bytes(section.content),
                     }
                 except RuntimeError:
@@ -277,7 +275,7 @@ def register_sections_generator(
                     pass
 
     generator = Generator.make_generator(
-        ["path", "name", "offset", "size", "type", "content"],
+        ("path", "name", "offset", "size", "type", "content"),
         sections_generator,
     )
 
@@ -303,7 +301,7 @@ def register_strings_generator(
             strtabs = [
                 section
                 for section in binary.sections
-                if section.type == lief.ELF.SECTION_TYPES.STRTAB
+                if section.type == lief.ELF.Section.TYPE.STRTAB
             ]
             # super important that these accessors are pulled out of the tight loop
             # as they can be costly
@@ -327,7 +325,7 @@ def register_strings_generator(
                     }
 
     generator = Generator.make_generator(
-        ["path", "section", "value", "offset"],
+        ("path", "section", "value", "offset"),
         strings_generator,
     )
 
@@ -369,23 +367,6 @@ def register_symbols_generator(
             # as they can be costly
             binary_name = binary.path
             for symbol in symbols(binary):
-                # The section index can be special numbers like 65521 or 65522
-                # that refer to special sections so they can't be indexed
-                section_name: str | None = next(
-                    (
-                        # technically name can be bytes, for now avoid this possibility
-                        # https://github.com/lief-project/LIEF/issues/965#issuecomment-1718702335
-                        cast(str, section.name)
-                        for shndx, section in enumerate(binary.sections)
-                        if shndx == symbol.shndx
-                    ),
-                    None,
-                )
-                if section_name is None or section_name == "":
-                    section_name = lief.ELF.SYMBOL_SECTION_INDEX.from_value(
-                        symbol.shndx
-                    ).__name__
-
                 yield {
                     "path": binary_name,
                     "name": symbol.name,
@@ -401,7 +382,7 @@ def register_symbols_generator(
                     # https://www.m4b.io/elf/export/binary/analysis/2015/05/25/what-is-an-elf-export.html
                     "imported": symbol.imported,
                     "exported": symbol.exported,
-                    "section": section_name,
+                    "section": symbol.section.name,
                     "size": symbol.size,
                     # TODO(fzakaria): Better understand why is it auxiliary?
                     # this returns versions like GLIBC_2.2.5
@@ -411,12 +392,12 @@ def register_symbols_generator(
                         and symbol.symbol_version.symbol_version_auxiliary
                         else None
                     ),
-                    "type": symbol.type.__name__,
+                    "type": symbol.type.name,
                     "value": symbol.value,
                 }
 
     generator = Generator.make_generator(
-        [
+        (
             "path",
             "name",
             "demangled_name",
@@ -427,7 +408,7 @@ def register_symbols_generator(
             "version",
             "type",
             "value",
-        ],
+        ),
         symbols_generator,
     )
 
@@ -465,7 +446,7 @@ def register_relocations_generator(
                     # the difference being whether addend is present in the struct
                     # https://refspecs.linuxbase.org/elf/gabi4+/ch4.reloc.html
                     "is_rela": relocation.is_rela,
-                    "purpose": relocation.purpose.__name__,
+                    "purpose": relocation.purpose.name,
                     "section": (
                         relocation.section.name if relocation.section else None
                     ),
@@ -476,12 +457,12 @@ def register_relocations_generator(
                         else None
                     ),
                     "type": relocation_type(
-                        binary.header.machine_type, relocation.type
+                        binary.header.machine_type, relocation.type.value
                     ),
                 }
 
     generator = Generator.make_generator(
-        [
+        (
             "path",
             "addend",
             "info",
@@ -491,7 +472,7 @@ def register_relocations_generator(
             "symbol",
             "symbol_table",
             "type",
-        ],
+        ),
         relocations_generator,
     )
 
@@ -506,8 +487,8 @@ def register_relocations_generator(
 
 def relocation_type(arch: lief.ELF.ARCH, type: int) -> str:
     """Return the relocation type as a string for a given arch."""
-    if arch == lief.ELF.ARCH.x86_64:
-        return lief.ELF.RELOCATION_X86_64.from_value(type).__name__
+    if arch == lief.ELF.ARCH.X86_64:
+        return lief.ELF.Relocation.TYPE.from_value(type).name
     raise RuntimeError(f"Unknown relocation type for {arch}")
 
 
@@ -535,7 +516,7 @@ def register_version_requirements(
                     }
 
     generator = Generator.make_generator(
-        ["path", "file", "name"],
+        ("path", "file", "name"),
         version_requirements_generator,
     )
 
@@ -572,7 +553,7 @@ def register_version_definitions(
                     }
 
     generator = Generator.make_generator(
-        ["path", "name", "flags"],
+        ("path", "name", "flags"),
         version_definitions_generator,
     )
 
@@ -654,7 +635,7 @@ def register_dwarf_dies(
                         }
 
     generator = Generator.make_generator(
-        ["path", "tag", "name", "low_pc", "high_pc", "offset", "size", "cu_offset"],
+        ("path", "tag", "name", "low_pc", "high_pc", "offset", "size", "cu_offset"),
         dwarf_dies_generator,
     )
 
@@ -699,7 +680,7 @@ def register_dwarf_dies_graph(
                             }
 
     generator = Generator.make_generator(
-        ["path", "parent_offset", "child_offset"],
+        ("path", "parent_offset", "child_offset"),
         dwarf_dies_graph_generator,
     )
 
@@ -769,7 +750,7 @@ def register_dwarf_debug_lines(
                         }
 
     generator = Generator.make_generator(
-        ["path", "filename", "address", "line", "column", "cu_offset"],
+        ("path", "filename", "address", "line", "column", "cu_offset"),
         dwarf_debug_lines_generator,
     )
 
@@ -798,7 +779,7 @@ def symbols(binary: lief_ext.Binary) -> Sequence[lief.ELF.Symbol]:
     We prefer symbols from the dynamic symbol table because the static symbol table
     will not include version information.
     """
-    static_symbols: Sequence[lief.ELF.Symbol] = binary.static_symbols  # type: ignore
+    static_symbols: Sequence[lief.ELF.Symbol] = binary.symtab_symbols  # type: ignore
     dynamic_symbols = list(binary.dynamic_symbols)
     dynamic_symbol_names = set(map(lambda s: s.name, dynamic_symbols))
     all_symbols = dynamic_symbols + [

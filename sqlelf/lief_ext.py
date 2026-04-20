@@ -1,10 +1,7 @@
 # pyright: strict
 from typing import TYPE_CHECKING, Any, Optional
 
-# ELF.pyi has no matching py file since it's a c extension
-# pyright: reportMissingModuleSource=false
-# https://github.com/microsoft/pyright/issues/5950
-import lief.ELF
+import lief
 
 # Let's make sure type checking works for this proxy class
 # https://stackoverflow.com/questions/71365594/how-to-make-a-proxy-object-with-typing-as-underlying-object-in-python
@@ -35,4 +32,4 @@ class Binary(base):
 
     @staticmethod
     def is_elf(path: str) -> bool:
-        return lief.is_elf(path)
+        return lief.is_elf(path) # type: ignore

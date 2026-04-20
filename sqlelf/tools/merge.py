@@ -19,8 +19,9 @@ def is_sqlite_file(file: str) -> bool:
     try:
         with apsw.Connection(file):
             return True
-    except apsw.NotADBError:
-        return False
+    except Exception:
+        pass
+    return False
 
 
 def start(args: list[str] = sys.argv[1:], stdin: TextIO = sys.stdin) -> None:
