@@ -382,7 +382,7 @@ def register_symbols_generator(
                     # https://www.m4b.io/elf/export/binary/analysis/2015/05/25/what-is-an-elf-export.html
                     "imported": symbol.imported,
                     "exported": symbol.exported,
-                    "section": symbol.section.name,
+                    "section": symbol.section.name if symbol.section is not None else None,
                     "size": symbol.size,
                     # TODO(fzakaria): Better understand why is it auxiliary?
                     # this returns versions like GLIBC_2.2.5
